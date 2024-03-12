@@ -1,0 +1,189 @@
+---
+title: "STA302: Spadina Project"
+author: Junwei Chen
+date: "10-03-2024"
+format:
+  pdf:
+    toc: true
+abstract: "This project critically evaluates the use of I's and i's on sa simulated dataset whereby the key novel is The Firefly. The findings suggests that the as the number of words increase, the average number of times I occurs in a sentence, also increase."
+editor: visual
+bibliography: ref.bib
+---
+
+\newpage
+
+# Introduction
+
+The current project aims to reproduce *Jane Eyre* by Charlotte Brontë example from the Chapter 13 whereby the name of the novel is changed to *The Firefly* of France Angellotti. In the domain of linguistics, the study of specific words occurence in of common interest to scholars which allows them to comprehensively evaluate the quality of the literary work. In this report, the similar approach is adopted whereby the novel is changed with initial model modifications to unearth the linguistic characteristics of the Firefly while evaluating the occurence of vowel term I or i.
+
+The current report initially discusses the features of the software and the packages used for the analysis. The report further discusses the variables used in the simulated data set, followed by the findings and discussions. The report further asserts the key limitations of the analysis followed by a conclusion section.
+
+# Data Management
+
+## Packages
+
+```{r, warning=FALSE, message=FALSE}
+# Importing important packages
+library(boot)
+library(broom.mixed)
+library(collapse)
+library(dataverse)
+library(gutenbergr)
+library(janitor)
+library(knitr)
+library(marginaleffects)
+library(modelsummary)
+library(rstanarm)
+library(tidyr)
+library(scales)
+library(readr)
+library(tidyverse)
+library(stringr)
+library(ggplot2)
+```
+
+In this report, several R packages are used whereby [@boot], [@broom.mixed], [@dataverse], [@knitr] and[@tidyverse] are used to clean, tidy, sort, and present the data in an appropriate manner. The other libraries such as [@marginaleffects], [@rstanarm], [@stringr], and [@ggplot2] are used to compute the models and present the findings using appropriate graphs.
+
+## Data source and cleaning
+
+The dataset is downloaded using [@gutenbergr-2] library where the information on texts associated with the selected novel are considered. The downloaded data is stored in a .csv file whereby the initial column is an integer and the next column is a text column which stores the respective lines from the main work. The final observation count includes 2 column with 6770 observations in total.
+
+```{r}
+# The Firefly of France Angellotti
+gutenberg_id_of_firefly <- 3676
+
+firefly <-
+  gutenberg_download(
+    gutenberg_id = gutenberg_id_of_firefly,
+    mirror = "https://gutenberg.pglaf.org/"
+  )
+
+firefly
+
+write.csv(firefly, "firefly.csv")
+```
+
+```{r}
+firefly <- read_csv(
+  "firefly.csv",
+  col_types = cols(
+    gutenberg_id = col_integer(),
+    text = col_character()
+  )
+)
+
+firefly
+```
+
+In the next section, several empty lines are removed, chapter number, and conclusion are removed including the extra use E's that are not related to the analysis. Thus, final cleaning of the data renders 4 variables and 270 observations. The initial column inlcudes text, next column comprise chapter, then the third chapter includes overall count of I's in the text selected, and the final column includes the overall word count.
+
+```{r}
+firefly_reduced <-
+  firefly |>
+  filter(!is.na(text)) |> # Remove empty lines
+  mutate(chapter = if_else(str_detect(text, "CHAPTER") == TRUE,
+                           text,
+                           NA_character_)) |> # Find start of chapter
+  fill(chapter, .direction = "down") |> 
+  mutate(chapter_line = row_number(), 
+         .by = chapter) |> # Add line number to each chapter
+  filter(!is.na(chapter), 
+         chapter_line %in% c(2:11)) |> # Remove "CHAPTER I" etc
+  select(text, chapter) |>
+  mutate(
+    chapter = str_remove(chapter, "CHAPTER "),
+    chapter = str_remove(chapter, "—CONCLUSION"),
+    chapter = as.integer(as.roman(chapter))
+  ) |> # Change chapters to integers
+  mutate(count_e = str_count(text, "i|I"),
+         word_count = str_count(text, "\\w+")
+         # From: https://stackoverflow.com/a/38058033
+         ) 
+
+```
+
+```{r}
+ firefly_reduced |>
+  select(chapter, word_count, count_e, text) |>
+  head()
+```
+
+# Findings and Discussion
+
+The findings from the first histogram as shown in Figure 1 suggests that the overall number of I's in the cleaned dataset comprise around 3 to 4 number of I's as compared to the other characters. The variance suggested from the blue line indicates that the variation in the occurrence of I's is greater than the average value of the vowel occurence in the cleaned dataset.
+
+Figure 2 indicates that the relationship between the number of I's in the dataset and the number of words are linear and correlated.
+
+Figure 3 suggests that the as the number of words increased, the likelihood of I's occurrence also increased in the work which indicates that the prevous works of the authors tend to extensively use I's when the scope of work expanded. These findings also highlights the significance of the use of vocabulory during the time of this novel which offers critical insights on the writing pattern for linguistics enthusiasts and researchers.
+
+```{r}
+#Histogram with Mean and Variance Lines
+mean_e <- mean(firefly_reduced$count_e)
+variance_e <- var(firefly_reduced$count_e)
+
+firefly_reduced |>
+  ggplot(aes(x = count_e)) +
+  geom_histogram() +
+  geom_vline(xintercept = mean_e, 
+             linetype = "dashed", 
+             color = "#C64191") +
+  geom_vline(xintercept = variance_e, 
+             linetype = "dashed", 
+             color = "#0ABAB5") +
+  theme_minimal() +
+  labs(
+    y = "Count",
+    x = "Figure 1: Number of I's per line for first ten lines"
+  )
+
+```
+
+```{r}
+#Scatter Plot with Jitter and Reference Line
+firefly_reduced |>
+  ggplot(aes(x = word_count, y = count_e)) +
+  geom_jitter(alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    x = "Number of words in the line",
+    y = "Number of i/Is in the line",
+    title = "Figure 2: Scatterplot"
+  )
+
+```
+
+```{r}
+firefly_e_counts <-
+  stan_glm(
+    count_e ~ word_count,
+    data = firefly_reduced,
+    family = poisson(link = "log"),
+    prior = normal(location = 0, scale = 2.5, autoscale = TRUE),
+    prior_intercept = normal(location = 0, scale = 2.5, autoscale = TRUE),
+    seed = 853
+  )
+
+saveRDS(
+  firefly_e_counts,
+  file = "firefly_e_counts.rds"
+)
+```
+
+```{r}
+plot_predictions(firefly_e_counts, condition = "word_count") +
+  labs(x = "Number of words",
+       y = "Average number of i/Is in the first 10 lines",
+       title ="Figure 3: Predictions" ) +
+  theme_classic()
+```
+
+# Conclusion
+
+The project implements a general analysis using simulated and cleaned dataset related to a novel, to evaluate the use of vowels like I's in the literary works. The key finding from the analysis suggests that the use of I's or i's increased in the works of scholars and writers as it is a vowel and mainly used in various English words to establish a certain meaning. The core limitation of the analysis is lack of evidence pertaining to the hypotheses testing, for example, researchers can hypothesise wheather a vowel like "I' occur more than 5 times in a sentence comprising 10 words. This will enable linguist researchers to compare the writing pattern and vovvcabolary use of the writers from different time period or contemporary time period.
+
+\newpage
+
+# References
+
+# 
